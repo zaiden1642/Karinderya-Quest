@@ -1,13 +1,31 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
 
+.vt323-regular {
+  font-family: "VT323", monospace;
+  font-weight: 400;
+  font-style: normal;
+}
+
+.jersey-10-regular {
+  font-family: "Jersey 10", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
+.jacquard-12-regular {
+  font-family: "Jacquard 12", system-ui;
+  font-weight: 400;
+  font-style: normal;
+}
+
 :root {
   --bg: #0b1020;
   --panel: rgba(13, 18, 35, 0.78);
   --panel-border: rgba(255, 255, 255, 0.1);
-  --text: #f5f7ff;
-  --muted: #a6b2d6;
+  --text: #ffffff;
+  --muted: #961616;
   --accent: #ffbe55;
-  --accent-2: #77f4c5;
+  --accent-2: #411f0c;
   --accent-hp: linear-gradient(90deg, #ff6b6b, #ff9a3d);
   --accent-energy: linear-gradient(90deg, #ffd166, #ff8c42);
   --accent-strength: linear-gradient(90deg, #82e0aa, #39c172);
@@ -15,7 +33,6 @@
   --accent-risk: linear-gradient(90deg, #ff7a7a, #c83b4b);
   --shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
 }
-
 * {
   box-sizing: border-box;
 }
@@ -28,12 +45,11 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--text);
-  font-family: 'Inter', sans-serif;
-  background:
-    radial-gradient(circle at top left, rgba(255, 190, 85, 0.2), transparent 30%),
-    radial-gradient(circle at right 10%, rgba(119, 244, 197, 0.15), transparent 26%),
-    linear-gradient(160deg, #09101d 0%, #0e1630 55%, #11162b 100%);
+  font-family: 'VT323', monospace;
+  background: url("background.png") center center fixed;
+  background-size: cover;
 }
+
 
 body::before {
   content: '';
@@ -46,15 +62,25 @@ body::before {
 }
 
 h1,
-h2,
 h3 {
   margin: 0;
-  font-family: 'Space Grotesk', sans-serif;
-  letter-spacing: -0.03em;
+  padding-bottom: 8px;
+  font-family: 'Jacquard 12', sans-serif;
+  font-weight: 400;
 }
 
 p {
   margin: 0;
+  font-family: 'VT323', monospace;
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+h2{
+  font-family: 'Jersey 10', sans-serif;
+  font-weight: 500;
+  font-size: 2.1 rem;
+  color: #ffffff;
 }
 
 button,
@@ -97,7 +123,12 @@ select {
 }
 
 .panel {
-  background: var(--panel);
+ background: #332e21;
+    border: 4px solid #2b2b2b;
+    padding: 20px;
+    border-radius: 0;
+    image-rendering: pixelated;
+    box-shadow: 0 0 0 4px #d6d2c4, 0 0 0 8px #2b2b2b;
   border: 1px solid var(--panel-border);
   backdrop-filter: blur(18px);
   border-radius: 28px;
@@ -125,10 +156,21 @@ select {
   text-transform: uppercase;
 }
 
+#wellness-score, #player-title, #day-count {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: rgb(60, 143, 60);
+}
+
+.hero span, .hero strong{
+  font-weight:100
+}
+
 .hero h1 {
-  font-size: clamp(2.7rem, 6vw, 5rem);
+  font-size: 4rem;
   line-height: 0.9;
   margin-bottom: 14px;
+  color: rgb(156, 37, 37);
 }
 
 .hero-text {
@@ -191,7 +233,14 @@ select {
 
 .status-ring strong {
   font-size: 3rem;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Jacquard 12', sans-serif;
+  font-weight: 400;
+}
+
+#report-card strong {
+  color: #326d10;
+  font-weight: bold;
+  font-size: 1.25rem;
 }
 
 .xp-block {
@@ -222,12 +271,13 @@ select {
   font-size: 0.95rem;
 }
 
+/*xp background*/
 .xp-track,
 .bar-track {
   width: 100%;
   height: 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(224, 199, 169);
   overflow: hidden;
 }
 
@@ -278,19 +328,26 @@ select {
   gap: 14px;
 }
 
+/*RPG style stat card*/
 .stat-card {
   padding: 16px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  background: f3e6c9;
+  background: rgba(243, 230, 201, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 1.5rem;
+  color: rgb(156, 37, 37);
 }
+.stat-head span{
+  font-size: 1.5rem;
+}
+
 
 .stat-head {
   align-items: center;
   margin-bottom: 10px;
 }
 
-.stat-head span,
 .quest-meta,
 .food-card p,
 .log-top p,
@@ -298,6 +355,9 @@ select {
 .archive-card p,
 .report-tip span {
   color: var(--muted);
+  font-family: 'VT323', monospace;
+  font-size: 0.85rem;
+  font-weight: 500;
 }
 
 .meal-form {
@@ -340,7 +400,8 @@ select {
   gap: 16px;
   padding: 20px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background: f3e6c9;
+  background: rgba(243, 230, 201, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.06);
   transition: opacity 220ms ease;
 }
@@ -355,9 +416,9 @@ select {
 }
 
 .wizard-step label span {
-  color: var(--accent-2);
+  color: rgb(121, 14, 14);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 1.1rem;
 }
 
 .step-hint {
@@ -371,11 +432,11 @@ select {
 .wizard-step select {
   width: 100%;
   padding: 14px 16px;
-  color: var(--text);
-  background: rgba(8, 12, 24, 0.72);
+  color: rgb(231, 212, 161);
+  background: rgb(153, 97, 56);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 16px;
-  font-size: 1rem;
+  font-size: 1.5rem;
 }
 
 .wizard-step input::placeholder {
@@ -392,8 +453,9 @@ select {
 .suggestion-item {
   padding: 12px 14px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(199, 143, 102);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  color:#411f0c;
   cursor: pointer;
   font-size: 0.95rem;
   transition: all 120ms ease;
@@ -415,8 +477,9 @@ select {
   align-items: center;
   padding: 12px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(235, 207, 171);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  color:#2b2b2b
 }
 
 .ingredient-item input {
@@ -471,11 +534,11 @@ select {
   flex: 1;
   padding: 12px 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
+  background: rgb(134, 125, 41);
+  color: #a3d88e;
   border-radius: 12px;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 1.5rem;
   font-weight: 500;
   transition: all 120ms ease;
 }
@@ -514,6 +577,7 @@ select {
   gap: 14px;
 }
 
+
 .quest-card,
 .combo-card,
 .food-card,
@@ -521,10 +585,25 @@ select {
 .archive-card,
 .empty-state,
 .report-card {
+  background-color: #cfbd94;
+  /* Subtle vignette + stains using gradients */
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.4) 0, transparent 50%),
+    radial-gradient(circle at 90% 80%, rgba(255, 255, 255, 0.3) 0, transparent 55%),
+    radial-gradient(circle at 50% 0%, rgba(0, 0, 0, 0.15) 0, transparent 60%),
+    radial-gradient(circle at 0% 100%, rgba(0, 0, 0, 0.12) 0, transparent 55%),
+    radial-gradient(circle at 100% 0%, rgba(0, 0, 0, 0.1) 0, transparent 55%);
+  background-blend-mode: multiply;
+  color: #378518;
   padding: 18px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(243, 230, 201, 0.95);
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px rgba(120, 90, 50, 0.35),
+    0 20px 40px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(120, 90, 50, 0.6);
 }
 
 .quest-card.is-complete {
@@ -539,7 +618,6 @@ select {
   align-items: start;
 }
 
-.quest-top h3,
 .combo-top h3,
 .food-top h3,
 .log-top h3 {
@@ -547,12 +625,26 @@ select {
   font-size: 1.05rem;
 }
 
+
+.quest-top h3{
+  font-size: 1.9rem;
+  color: rgb(8, 41, 68);
+}
+
+#report-card h3{
+  font-size: 3rem;
+}
+
+
+#report-card p{
+  font-size: 1.3rem;
+}
 .quest-top p,
 .combo-card p,
 .food-card p,
 .archive-card p,
 .report-card p {
-  line-height: 1.6;
+  line-height: 1.6rem;
 }
 
 .reward {
@@ -589,8 +681,11 @@ select {
 .report-grid div,
 .archive-card {
   padding: 14px;
+  margin: 5px;
+  padding-bottom: 8px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
+  background: #f3e6c9;
+  background: rgba(243, 230, 201, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -606,8 +701,10 @@ select {
   padding: 16px;
   border-left: 3px solid var(--accent);
   border-radius: 16px;
-  background: rgba(255, 190, 85, 0.08);
+  background: rgba(243, 230, 201, 0.500);
+  color: rgb(8, 60, 121);
 }
+
 
 .report-tip span {
   display: block;
@@ -639,11 +736,12 @@ select {
 
 .chip {
   padding: 6px 10px;
-  border-radius: 999px;
   font-size: 0.8rem;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text);
+  background: #cfbc9e;
+  color: #3b2b1a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
+
 
 .effect-grid {
   display: grid;
@@ -670,6 +768,10 @@ select {
 .empty-state {
   color: var(--muted);
   text-align: center;
+}
+
+.subtle-box {
+  border-style: dashed;
 }
 
 .hidden {
