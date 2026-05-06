@@ -672,6 +672,139 @@ select {
   text-align: center;
 }
 
+.hidden {
+  display: none !important;
+}
+
+.auth-panel {
+  padding: 22px 24px;
+  margin-bottom: 24px;
+}
+
+.auth-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.auth-header h2 {
+  font-size: 1.4rem;
+}
+
+.auth-toggle {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 4px;
+}
+
+.auth-tab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.auth-tab.active {
+  background: rgba(119, 244, 197, 0.2);
+  color: var(--text);
+}
+
+.auth-status {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.92rem;
+}
+
+.auth-status.ok {
+  border: 1px solid rgba(119, 244, 197, 0.4);
+  background: rgba(119, 244, 197, 0.12);
+}
+
+.auth-status.error {
+  border: 1px solid rgba(255, 122, 122, 0.4);
+  background: rgba(255, 122, 122, 0.12);
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-form.compact {
+  margin-top: 12px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-form label span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 12px 14px;
+  color: var(--text);
+  background: rgba(8, 12, 24, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+}
+
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.auth-btn {
+  border: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #10131f;
+  background: linear-gradient(135deg, #ffbe55 0%, #77f4c5 100%);
+}
+
+.auth-btn.secondary {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.profile-view {
+  display: grid;
+  gap: 10px;
+}
+
+.profile-meta h3 {
+  margin-bottom: 4px;
+}
+
+.profile-meta p {
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.meal-form-wizard.locked {
+  opacity: 0.6;
+}
+
 .subtle-box {
   border-style: dashed;
 }
@@ -693,6 +826,10 @@ select {
 
   .report-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auth-grid {
+    grid-template-columns: 1fr;
   }
 }
 

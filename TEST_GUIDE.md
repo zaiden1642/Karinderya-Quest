@@ -292,7 +292,7 @@ rm -rf cache/*
 **Cause**: GEMINI_API_KEY not set or invalid
 **Workaround**: 
 1. Verify environment variable is set
-2. Test API key: `curl -H "Authorization: Bearer YOUR_KEY" https://generativelanguage.googleapis.com/v1beta2/models`
+2. Test API key: `curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=YOUR_KEY" -H "Content-Type: application/json" -d '{"contents":[{"parts":[{"text":"ping"}]}]}'`
 3. Clear browser cache and retry
 
 ### Issue 2: Calorie estimates are way off (< 100 or > 2000)

@@ -209,6 +209,92 @@ function asset_version($relativePath) {
             </div>
         </section>
 
+        <section class="panel auth-panel" id="auth-panel">
+            <div class="auth-header">
+                <div>
+                    <span class="eyebrow">Account</span>
+                    <h2>Sign up or log in</h2>
+                </div>
+                <div class="auth-toggle" id="auth-toggle">
+                    <button type="button" data-auth-view="login" class="auth-tab active">Login</button>
+                    <button type="button" data-auth-view="signup" class="auth-tab">Sign Up</button>
+                </div>
+            </div>
+
+            <div id="auth-status" class="auth-status hidden"></div>
+
+            <form id="login-form" class="auth-form">
+                <label>
+                    <span>Email</span>
+                    <input id="login-email" type="email" required placeholder="you@example.com">
+                </label>
+                <label>
+                    <span>Password</span>
+                    <input id="login-password" type="password" required placeholder="Enter password">
+                </label>
+                <button type="submit" class="auth-btn">Login</button>
+            </form>
+
+            <form id="signup-form" class="auth-form hidden">
+                <label>
+                    <span>Username</span>
+                    <input id="signup-username" type="text" minlength="3" required placeholder="e.g. ricewarrior">
+                </label>
+                <label>
+                    <span>Email</span>
+                    <input id="signup-email" type="email" required placeholder="you@example.com">
+                </label>
+                <label>
+                    <span>Password</span>
+                    <input id="signup-password" type="password" minlength="6" required placeholder="At least 6 characters">
+                </label>
+                <div class="auth-grid">
+                    <label>
+                        <span>Birthdate</span>
+                        <input id="signup-birthdate" type="date" required>
+                    </label>
+                    <label>
+                        <span>Height (cm)</span>
+                        <input id="signup-height" type="number" min="80" max="260" step="1" required placeholder="170">
+                    </label>
+                    <label>
+                        <span>Weight (kg)</span>
+                        <input id="signup-weight" type="number" min="20" max="300" step="0.1" required placeholder="65">
+                    </label>
+                </div>
+                <button type="submit" class="auth-btn">Create Account</button>
+            </form>
+
+            <div id="profile-view" class="profile-view hidden">
+                <div class="profile-meta">
+                    <h3 id="profile-name">User</h3>
+                    <p id="profile-email">-</p>
+                    <p id="profile-bmi">BMI: -</p>
+                </div>
+
+                <form id="profile-form" class="auth-form compact">
+                    <div class="auth-grid">
+                        <label>
+                            <span>Birthdate</span>
+                            <input id="profile-birthdate" type="date" required>
+                        </label>
+                        <label>
+                            <span>Height (cm)</span>
+                            <input id="profile-height" type="number" min="80" max="260" step="1" required>
+                        </label>
+                        <label>
+                            <span>Weight (kg)</span>
+                            <input id="profile-weight" type="number" min="20" max="300" step="0.1" required>
+                        </label>
+                    </div>
+                    <div class="auth-actions">
+                        <button type="submit" class="auth-btn">Update Profile</button>
+                        <button type="button" id="logout-btn" class="auth-btn secondary">Logout</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
         <section class="dashboard-grid">
             <section class="panel stats-panel">
                 <div class="panel-heading">

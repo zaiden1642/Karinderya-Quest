@@ -1,5 +1,7 @@
 const DATA = window.KARINDERYA_DATA;
 const STORAGE_KEY = 'karinderya-quest-state-v1';
+const GEMINI_CACHE_KEY = 'karinderya-gemini-cache-v1';
+const GEMINI_CACHE_TTL = 86400000; // 24 hours in milliseconds
 const LEVEL_THRESHOLDS = [0, 100, 250, 450, 700, 1000, 1350, 1750, 2200, 2700];
 const LEVEL_TITLES = [
   'Street Rookie',
@@ -61,29 +63,102 @@ const QUEST_DEFS = [
   },
 ];
 
+// ============ Gemini Cache Management ============
+
+function getGeminiCache() {
+  const cached = localStorage.getItem(GEMINI_CACHE_KEY);
+  return cached ? JSON.parse(cached) : {};
+}
+
+function setGeminiCache(cache) {
+  localStorage.setItem(GEMINI_CACHE_KEY, JSON.stringify(cache));
+}
+
+function getCachedGeminiData(key) {
+  const cache = getGeminiCache();
+  const entry = cache[key];
+  if (!entry) return null;
+  
+  // Check if cache has expired
+  if (entry.expires && Date.now() > entry.expires) {
+    delete cache[key];
+    setGeminiCache(cache);
+    return null;
+  }
+  
+  return entry.data;
+}
+
+function setCachedGeminiData(key, data, ttl = GEMINI_CACHE_TTL) {
+  const cache = getGeminiCache();
+  cache[key] = {
+    data,
+    expires: Date.now() + ttl,
+  };
+  setGeminiCache(cache);
+}
+
 // ============ Gemini Helper Functions ============
 
 /**
- * Call the Gemini API for food search
+ * Call the Gemini API for food search - with intelligent caching
  */
 async function searchFoodsWithGemini(query) {
   try {
-    const res = await fetch('api/gemini.php?action=search', {
+    const normalizedQuery = query.trim().toLowerCase();
+    const cacheKey = `search_${normalizedQuery}`;
+    
+    // Check cache first
+    const cached = getCachedGeminiData(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    // Try local database first (free search)
+    const localMatches = DATA.foodItems.filter(item => 
+      item.name.toLowerCase().includes(normalizedQuery) || 
+      item.category.toLowerCase().includes(normalizedQuery) ||
+      (item.tags && item.tags.some(tag => tag.toLowerCase().includes(normalizedQuery)))
+    );
+    
+    if (localMatches.length > 0) {
+      return localMatches;
+    }
+    
+    // Only call Gemini if no local matches found (conserve quota)
+    const prompt = `You are a Filipino food expert. User is searching for food matching "${query}". Return a JSON array of 5-8 Filipino dishes or meals that match the search. Include ONLY these fields per item: name (string), category (string), estimatedCalories (number), tags (array of strings). Be consistent with Filipino cuisine. Output ONLY valid JSON array, no other text.`;
+    
+    const res = await fetch('api/gemini.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ message: prompt }),
     });
     
     if (!res.ok) {
       console.warn('Food search returned non-OK', res.status);
-      return [];
+      return localMatches.length > 0 ? localMatches : [];
     }
 
     const json = await res.json();
-    if (json.ok && json.results && Array.isArray(json.results)) {
-      return json.results;
+    let responseText = '';
+    if (json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0]) {
+      responseText = json.candidates[0].content.parts[0].text || '';
     }
-    return [];
+    
+    if (!responseText) {
+      return localMatches.length > 0 ? localMatches : [];
+    }
+
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const results = JSON.parse(jsonMatch[0]);
+      const finalResults = Array.isArray(results) ? results : [];
+      // Cache the Gemini result
+      setCachedGeminiData(cacheKey, finalResults, GEMINI_CACHE_TTL);
+      return finalResults;
+    }
+    
+    return localMatches.length > 0 ? localMatches : [];
   } catch (err) {
     console.warn('searchFoodsWithGemini error', err);
     return [];
@@ -91,22 +166,60 @@ async function searchFoodsWithGemini(query) {
 }
 
 /**
- * Call the Gemini API to get full food details
+ * Call the Gemini API to get full food details - with caching
  */
 async function getFoodDetailsFromGemini(foodName) {
   try {
-    const res = await fetch(`api/gemini.php?action=getFood&name=${encodeURIComponent(foodName)}`);
+    const normalizedName = foodName.trim().toLowerCase();
+    const cacheKey = `food_${normalizedName}`;
+    
+    // Check cache first
+    const cached = getCachedGeminiData(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    // Try local database first (free lookup)
+    const localFood = DATA.foodItems.find(item => 
+      item.name.toLowerCase() === normalizedName
+    );
+    if (localFood) {
+      return localFood;
+    }
+    
+    // Only call Gemini if not in local database
+    const prompt = `You are a Filipino food expert and nutritionist. For the dish "${foodName}", return a JSON object with ONLY these fields: name (string), category (string), calories (number), price (number in PHP), tags (array), ingredients (array of strings), effects (object with hp, energy, strength, defense, risk, xp as numbers 0-20). Consider typical preparation. Output ONLY valid JSON object, no other text.`;
+    
+    const res = await fetch('api/gemini.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: prompt }),
+    });
     
     if (!res.ok) {
       console.warn('getFood returned non-OK', res.status);
-      return null;
+      return localFood || null;
     }
 
     const json = await res.json();
-    if (json.ok && json.food) {
-      return json.food;
+    let responseText = '';
+    if (json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0]) {
+      responseText = json.candidates[0].content.parts[0].text || '';
     }
-    return null;
+    
+    if (!responseText) {
+      return localFood || null;
+    }
+
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const food = JSON.parse(jsonMatch[0]);
+      // Cache the result
+      setCachedGeminiData(cacheKey, food, GEMINI_CACHE_TTL);
+      return food;
+    }
+    
+    return localFood || null;
   } catch (err) {
     console.warn('getFoodDetailsFromGemini error', err);
     return null;
@@ -114,20 +227,26 @@ async function getFoodDetailsFromGemini(foodName) {
 }
 
 /**
- * Call the Gemini API to estimate nutrients from ingredients
+ * Call the Gemini API to estimate nutrients from ingredients - with caching
  */
 async function estimateNutrientsWithGemini(ingredients) {
   try {
-    // Format ingredients for Gemini
-    const ingredientList = ingredients.map(ing => ({
-      name: ing.name,
-      servingSize: ing.servingSize || 1
-    }));
+    // Create cache key from sorted ingredient list
+    const cacheKey = `nutrients_${ingredients.map(i => `${i.name}x${i.servingSize || 1}`).sort().join('_')}`;
+    
+    // Check cache first
+    const cached = getCachedGeminiData(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    const ingredientList = ingredients.map(ing => `${ing.name} (x${ing.servingSize || 1})`).join(', ');
+    const prompt = `You are a nutritionist. Given these Filipino meal ingredients with serving sizes: ${ingredientList}. Estimate total calories and macro breakdown (protein/carbs/fat in grams). Return ONLY a JSON object: {"calories":number,"protein":number,"carbs":number,"fat":number}. No other text.`;
 
-    const res = await fetch('api/gemini.php?action=estimateNutrients', {
+    const res = await fetch('api/gemini.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ingredients: ingredientList }),
+      body: JSON.stringify({ message: prompt }),
     });
     
     if (!res.ok) {
@@ -136,8 +255,21 @@ async function estimateNutrientsWithGemini(ingredients) {
     }
 
     const json = await res.json();
-    if (json.ok && json.nutrients) {
-      return json.nutrients;
+    let responseText = '';
+    if (json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0]) {
+      responseText = json.candidates[0].content.parts[0].text || '';
+    }
+    
+    if (!responseText) {
+      return null;
+    }
+
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const nutrients = JSON.parse(jsonMatch[0]);
+      // Cache the result with 24 hour TTL
+      setCachedGeminiData(cacheKey, nutrients, GEMINI_CACHE_TTL);
+      return nutrients;
     }
     return null;
   } catch (err) {
@@ -147,18 +279,26 @@ async function estimateNutrientsWithGemini(ingredients) {
 }
 
 /**
- * Call the Gemini API to generate RPG effects for a meal
+ * Call the Gemini API to generate RPG effects for a meal - with caching
  */
 async function generateEffectsWithGemini(mealName, ingredients, calories) {
   try {
-    const res = await fetch('api/gemini.php?action=generateEffects', {
+    // Create cache key from meal + ingredients + calories
+    const cacheKey = `effects_${mealName.toLowerCase()}_${Array.isArray(ingredients) ? ingredients.sort().join('_') : 'none'}_${calories || 0}`;
+    
+    // Check cache first
+    const cached = getCachedGeminiData(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    const ingredientStr = Array.isArray(ingredients) && ingredients.length > 0 ? ingredients.join(', ') : 'unknown ingredients';
+    const prompt = `You are an RPG game designer for a Filipino food health tracker. For meal "${mealName}" with ingredients: ${ingredientStr} (~${calories || 300} calories), generate RPG stat effects. Each stat is 0-20. Consider: vegetarian/balance -> Defense/HP, protein -> Strength, fried -> Risk, healthy -> Energy. Return ONLY JSON: {"hp":number,"energy":number,"strength":number,"defense":number,"risk":number,"xp":number}. No other text.`;
+
+    const res = await fetch('api/gemini.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mealName,
-        ingredients,
-        calories,
-      }),
+      body: JSON.stringify({ message: prompt }),
     });
     
     if (!res.ok) {
@@ -167,16 +307,30 @@ async function generateEffectsWithGemini(mealName, ingredients, calories) {
     }
 
     const json = await res.json();
-    if (json.ok && json.effects) {
+    let responseText = '';
+    if (json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0]) {
+      responseText = json.candidates[0].content.parts[0].text || '';
+    }
+    
+    if (!responseText) {
+      return null;
+    }
+
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const effects = JSON.parse(jsonMatch[0]);
       // Ensure effects are clamped to reasonable ranges
-      return {
-        hp: Math.max(0, Math.min(20, json.effects.hp || 0)),
-        energy: Math.max(0, Math.min(20, json.effects.energy || 0)),
-        strength: Math.max(0, Math.min(20, json.effects.strength || 0)),
-        defense: Math.max(0, Math.min(20, json.effects.defense || 0)),
-        risk: Math.max(0, Math.min(20, json.effects.risk || 0)),
-        xp: Math.max(8, Math.min(30, json.effects.xp || 12)),
+      const clamped = {
+        hp: Math.max(0, Math.min(20, effects.hp || 0)),
+        energy: Math.max(0, Math.min(20, effects.energy || 0)),
+        strength: Math.max(0, Math.min(20, effects.strength || 0)),
+        defense: Math.max(0, Math.min(20, effects.defense || 0)),
+        risk: Math.max(0, Math.min(20, effects.risk || 0)),
+        xp: Math.max(8, Math.min(30, effects.xp || 12)),
       };
+      // Cache the result
+      setCachedGeminiData(cacheKey, clamped, GEMINI_CACHE_TTL);
+      return clamped;
     }
     return null;
   } catch (err) {
@@ -187,6 +341,7 @@ async function generateEffectsWithGemini(mealName, ingredients, calories) {
 
 const state = loadState();
 const nodes = {};
+let currentUser = null;
 let wizardState = {
   currentStep: 1,
   selectedDish: null,
@@ -196,9 +351,10 @@ let wizardState = {
   mealCalories: 0,
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   cacheNodes();
   bindEvents();
+  await initializeAccountManagement();
   syncDay();
   render();
   initializeWizard();
@@ -225,6 +381,30 @@ function cacheNodes() {
   nodes.ingredientsEditor = document.getElementById('ingredients-editor');
   nodes.customDish = document.getElementById('custom-dish');
   nodes.customCalories = document.getElementById('custom-calories');
+
+  nodes.authToggle = document.getElementById('auth-toggle');
+  nodes.authStatus = document.getElementById('auth-status');
+  nodes.loginForm = document.getElementById('login-form');
+  nodes.signupForm = document.getElementById('signup-form');
+  nodes.profileView = document.getElementById('profile-view');
+  nodes.profileForm = document.getElementById('profile-form');
+  nodes.logoutBtn = document.getElementById('logout-btn');
+
+  nodes.loginEmail = document.getElementById('login-email');
+  nodes.loginPassword = document.getElementById('login-password');
+  nodes.signupUsername = document.getElementById('signup-username');
+  nodes.signupEmail = document.getElementById('signup-email');
+  nodes.signupPassword = document.getElementById('signup-password');
+  nodes.signupBirthdate = document.getElementById('signup-birthdate');
+  nodes.signupHeight = document.getElementById('signup-height');
+  nodes.signupWeight = document.getElementById('signup-weight');
+
+  nodes.profileName = document.getElementById('profile-name');
+  nodes.profileEmail = document.getElementById('profile-email');
+  nodes.profileBmi = document.getElementById('profile-bmi');
+  nodes.profileBirthdate = document.getElementById('profile-birthdate');
+  nodes.profileHeight = document.getElementById('profile-height');
+  nodes.profileWeight = document.getElementById('profile-weight');
 }
 
 function bindEvents() {
@@ -237,7 +417,7 @@ function bindEvents() {
   
   // Wizard navigation
   document.querySelectorAll('.step-next-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.preventDefault();
       const nextStep = Number(btn.dataset.next);
       if (nextStep === 2 && nodes.mealType.value === '') {
@@ -249,7 +429,7 @@ function bindEvents() {
         return;
       }
       if (nextStep === 3) {
-        processMainDishInput();
+        await processMainDishInput();
       }
       goToStep(nextStep);
     });
@@ -262,8 +442,15 @@ function bindEvents() {
     });
   });
 
-  // Main dish autocomplete - use Gemini search
+  // Main dish autocomplete - use Gemini search with debounce to conserve API quota
+  let mainDishSearchTimeout = null;
+  
   nodes.mainDish.addEventListener('input', async (e) => {
+    // Clear previous timeout
+    if (mainDishSearchTimeout) {
+      clearTimeout(mainDishSearchTimeout);
+    }
+    
     const query = e.target.value.trim().toLowerCase();
     wizardState.mainDishInput = e.target.value.trim();
     
@@ -272,61 +459,208 @@ function bindEvents() {
       return;
     }
 
-    // Show loading state
-    nodes.dishSuggestions.innerHTML = '<div style="color: var(--muted); padding: 12px; font-size: 0.9rem;">Searching...</div>';
+    // Debounce the search - wait 500ms before searching
+    mainDishSearchTimeout = setTimeout(async () => {
+      // Show loading state
+      nodes.dishSuggestions.innerHTML = '<div style="color: var(--muted); padding: 12px; font-size: 0.9rem;">Searching...</div>';
 
-    // Try Gemini search first, then fallback to local filter
-    let matches = await searchFoodsWithGemini(query);
-    
-    if (matches.length === 0) {
-      // Fallback to local database filter if Gemini returns nothing
-      matches = DATA.foodItems.filter(item => 
-        item.name.toLowerCase().includes(query) || item.category.toLowerCase().includes(query)
-      );
-    }
+      // searchFoodsWithGemini now checks local database first, then cache, then Gemini
+      let matches = await searchFoodsWithGemini(query);
+      
+      if (matches.length === 0) {
+        // Fallback to local database filter if search returns nothing
+        matches = DATA.foodItems.filter(item => 
+          item.name.toLowerCase().includes(query) || item.category.toLowerCase().includes(query)
+        );
+      }
 
-    if (matches.length === 0) {
-      nodes.dishSuggestions.innerHTML = '<div style="color: var(--muted); padding: 12px; font-size: 0.9rem;">No matches found. You can proceed with a custom dish.</div>';
-      return;
-    }
+      if (matches.length === 0) {
+        nodes.dishSuggestions.innerHTML = '<div style="color: var(--muted); padding: 12px; font-size: 0.9rem;">No matches found. You can proceed with a custom dish.</div>';
+        return;
+      }
 
-    // Display results from Gemini or local database
-    nodes.dishSuggestions.innerHTML = matches.map((item, idx) => {
-      const displayName = item.name || item.displayName;
-      const category = item.category || item.estimatedCalories ? `~${item.estimatedCalories} cal` : 'Filipino Dish';
-      return `<div class="suggestion-item" data-suggestion-index="${idx}"><strong>${displayName}</strong> · ${category}</div>`;
-    }).join('');
+      // Display results from search (local database, cache, or Gemini)
+      nodes.dishSuggestions.innerHTML = matches.map((item, idx) => {
+        const displayName = item.name || item.displayName;
+        const category = item.category || item.estimatedCalories ? `~${item.estimatedCalories} cal` : 'Filipino Dish';
+        return `<div class="suggestion-item" data-suggestion-index="${idx}"><strong>${displayName}</strong> · ${category}</div>`;
+      }).join('');
 
-    nodes.dishSuggestions.querySelectorAll('.suggestion-item').forEach((item, idx) => {
-      item.addEventListener('click', async () => {
-        const selectedItem = matches[idx];
-        nodes.mainDish.value = selectedItem.name || selectedItem.displayName;
-        nodes.dishSuggestions.innerHTML = '';
-        
-        // Try to get full details from Gemini
-        const fullDetails = await getFoodDetailsFromGemini(selectedItem.name || selectedItem.displayName);
-        if (fullDetails) {
-          wizardState.selectedDish = fullDetails;
-          wizardState.selectedIngredients = [...(fullDetails.ingredients || [])];
-          wizardState.ingredientServingSizes = {};
-          (fullDetails.ingredients || []).forEach(ing => {
-            wizardState.ingredientServingSizes[ing] = 1;
-          });
-        } else {
-          // Fallback: treat as selected from local database
-          const localDish = DATA.foodItems.find(d => d.name.toLowerCase() === (selectedItem.name || selectedItem.displayName).toLowerCase());
-          if (localDish) {
-            wizardState.selectedDish = localDish;
-            wizardState.selectedIngredients = [...(localDish.ingredients || [])];
+      nodes.dishSuggestions.querySelectorAll('.suggestion-item').forEach((item, idx) => {
+        item.addEventListener('click', async () => {
+          const selectedItem = matches[idx];
+          nodes.mainDish.value = selectedItem.name || selectedItem.displayName;
+          nodes.dishSuggestions.innerHTML = '';
+          
+          // Try to get full details (checks local DB first, then cache, then Gemini)
+          const fullDetails = await getFoodDetailsFromGemini(selectedItem.name || selectedItem.displayName);
+          if (fullDetails) {
+            wizardState.selectedDish = fullDetails;
+            wizardState.selectedIngredients = [...(fullDetails.ingredients || [])];
             wizardState.ingredientServingSizes = {};
-            (localDish.ingredients || []).forEach(ing => {
+            (fullDetails.ingredients || []).forEach(ing => {
               wizardState.ingredientServingSizes[ing] = 1;
             });
+          } else {
+            // Fallback: treat as selected from local database
+            const localDish = DATA.foodItems.find(d => d.name.toLowerCase() === (selectedItem.name || selectedItem.displayName).toLowerCase());
+            if (localDish) {
+              wizardState.selectedDish = localDish;
+              wizardState.selectedIngredients = [...(localDish.ingredients || [])];
+              wizardState.ingredientServingSizes = {};
+              (localDish.ingredients || []).forEach(ing => {
+                wizardState.ingredientServingSizes[ing] = 1;
+              });
+            }
           }
-        }
+        });
       });
+    }, 500); // Wait 500ms before searching
+  });
+}
+
+async function callAccountApi(action, payload = {}) {
+  const res = await fetch('api/account.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload }),
+  });
+
+  const data = await res.json().catch(() => ({ error: 'Invalid server response' }));
+  if (!res.ok || data.error) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+function showAuthStatus(message, type = 'ok') {
+  if (!nodes.authStatus) return;
+  nodes.authStatus.textContent = message;
+  nodes.authStatus.classList.remove('hidden', 'ok', 'error');
+  nodes.authStatus.classList.add(type === 'error' ? 'error' : 'ok');
+}
+
+function setMealLoggingEnabled(enabled) {
+  if (!nodes.mealForm) return;
+  nodes.mealForm.classList.toggle('locked', !enabled);
+  nodes.mealForm.querySelectorAll('input, select, button, textarea').forEach(el => {
+    el.disabled = !enabled;
+  });
+}
+
+function switchAuthView(view) {
+  if (!nodes.loginForm || !nodes.signupForm || !nodes.authToggle) return;
+  nodes.loginForm.classList.toggle('hidden', view !== 'login');
+  nodes.signupForm.classList.toggle('hidden', view !== 'signup');
+  nodes.authToggle.querySelectorAll('.auth-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.authView === view);
+  });
+}
+
+function applyUserToProfile(user) {
+  nodes.profileName.textContent = user.username || 'User';
+  nodes.profileEmail.textContent = user.email || '-';
+  nodes.profileBmi.textContent = typeof user.bmi === 'number' ? `BMI: ${user.bmi}` : 'BMI: -';
+
+  nodes.profileBirthdate.value = user.birthdate || '';
+  nodes.profileHeight.value = user.height_cm || '';
+  nodes.profileWeight.value = user.weight_kg || '';
+}
+
+function setAuthState(user) {
+  currentUser = user || null;
+
+  const isLoggedIn = Boolean(currentUser);
+  nodes.profileView.classList.toggle('hidden', !isLoggedIn);
+  nodes.loginForm.classList.toggle('hidden', isLoggedIn);
+  nodes.signupForm.classList.add('hidden');
+  nodes.authToggle.classList.toggle('hidden', isLoggedIn);
+
+  if (isLoggedIn) {
+    applyUserToProfile(currentUser);
+    showAuthStatus(`Logged in as ${currentUser.username}`, 'ok');
+    setMealLoggingEnabled(true);
+  } else {
+    switchAuthView('login');
+    showAuthStatus('Log in to start saving meals and tracking your profile.', 'error');
+    setMealLoggingEnabled(false);
+  }
+}
+
+async function initializeAccountManagement() {
+  if (!nodes.loginForm || !nodes.signupForm || !nodes.profileForm) {
+    return;
+  }
+
+  nodes.authToggle.querySelectorAll('.auth-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchAuthView(btn.dataset.authView);
+      nodes.authStatus.classList.add('hidden');
     });
   });
+
+  nodes.loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const data = await callAccountApi('login', {
+        email: nodes.loginEmail.value.trim(),
+        password: nodes.loginPassword.value,
+      });
+      setAuthState(data.user);
+      nodes.loginForm.reset();
+    } catch (err) {
+      showAuthStatus(err.message, 'error');
+    }
+  });
+
+  nodes.signupForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const data = await callAccountApi('register', {
+        username: nodes.signupUsername.value.trim(),
+        email: nodes.signupEmail.value.trim(),
+        password: nodes.signupPassword.value,
+        birthdate: nodes.signupBirthdate.value,
+        height_cm: Number(nodes.signupHeight.value),
+        weight_kg: Number(nodes.signupWeight.value),
+      });
+      setAuthState(data.user);
+      nodes.signupForm.reset();
+    } catch (err) {
+      showAuthStatus(err.message, 'error');
+    }
+  });
+
+  nodes.profileForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const data = await callAccountApi('update_profile', {
+        birthdate: nodes.profileBirthdate.value,
+        height_cm: Number(nodes.profileHeight.value),
+        weight_kg: Number(nodes.profileWeight.value),
+      });
+      setAuthState(data.user);
+      showAuthStatus('Profile updated successfully.', 'ok');
+    } catch (err) {
+      showAuthStatus(err.message, 'error');
+    }
+  });
+
+  nodes.logoutBtn.addEventListener('click', async () => {
+    try {
+      await callAccountApi('logout');
+      setAuthState(null);
+    } catch (err) {
+      showAuthStatus(err.message, 'error');
+    }
+  });
+
+  try {
+    const me = await callAccountApi('me');
+    setAuthState(me.user || null);
+  } catch {
+    setAuthState(null);
+  }
 }
 
 function loadState() {
@@ -394,6 +728,11 @@ function syncDay() {
 async function handleMealSubmit(event) {
   event.preventDefault();
 
+  if (!currentUser) {
+    showAuthStatus('Please log in first before logging meals.', 'error');
+    return;
+  }
+
   let dish;
   let calculatedCalories = 0;
   
@@ -456,13 +795,39 @@ async function handleMealSubmit(event) {
   goToStep(1);
 }
 
-// Send meal entry to server-side Gemini proxy to generate a short summary
+// Send meal entry to server-side Gemini proxy to generate a short summary - with caching
 async function sendToGemini(entry) {
   try {
+    // Create a cache key from the meal name and ingredients
+    const cacheKey = `summary_${entry.name.toLowerCase()}_${(entry.ingredients || []).sort().join('_')}`;
+    
+    // Check cache first
+    const cached = getCachedGeminiData(cacheKey);
+    if (cached) {
+      // Attach cached summary to the saved log entry and persist
+      const idx = state.logs.findIndex(l => l.id === entry.id);
+      if (idx !== -1) {
+        state.logs[idx].geminiSummary = cached;
+        persist();
+        render();
+      }
+      return cached;
+    }
+    
+    const mealJson = JSON.stringify({
+      name: entry.name,
+      category: entry.category,
+      calories: entry.calories,
+      tags: entry.tags,
+      ingredients: entry.ingredients,
+    });
+
+    const prompt = `You are a helpful nutrition assistant. Given the meal log JSON below, return a concise summary (1-2 sentences), list the top 2 benefits, and suggest one micro-tip to make the meal healthier. Output as JSON with keys: summary, benefits (array of strings), tip.\n\nMeal JSON:\n${mealJson}`;
+
     const res = await fetch('/api/gemini.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entry),
+      body: JSON.stringify({ message: prompt }),
     });
 
     if (!res.ok) {
@@ -471,15 +836,31 @@ async function sendToGemini(entry) {
     }
 
     const json = await res.json();
-    // Attach returned summary to the saved log entry and persist
-    const idx = state.logs.findIndex(l => l.id === entry.id);
-    if (idx !== -1) {
-      state.logs[idx].gemini = json;
-      persist();
-      render();
+    let responseText = '';
+    if (json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0]) {
+      responseText = json.candidates[0].content.parts[0].text || '';
+    }
+    
+    if (!responseText) {
+      return null;
     }
 
-    return json;
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const summary = JSON.parse(jsonMatch[0]);
+      // Cache the summary
+      setCachedGeminiData(cacheKey, summary, GEMINI_CACHE_TTL);
+      // Attach returned summary to the saved log entry and persist
+      const idx = state.logs.findIndex(l => l.id === entry.id);
+      if (idx !== -1) {
+        state.logs[idx].geminiSummary = summary;
+        persist();
+        render();
+      }
+      return summary;
+    }
+
+    return null;
   } catch (err) {
     console.warn('sendToGemini error', err);
     return null;
@@ -487,11 +868,10 @@ async function sendToGemini(entry) {
 }
 
 function buildIngredientBreakdown() {
-  const ingredientDb = DATA.ingredients || {};
   const breakdown = [];
   
   wizardState.selectedIngredients.forEach(ingredientName => {
-    const info = ingredientDb[ingredientName] || { category: 'Other', baseCalories: 100, unit: 'serving' };
+    const info = resolveIngredientInfo(ingredientName);
     const servingSize = wizardState.ingredientServingSizes[ingredientName] || 1;
     const calories = Math.round(info.baseCalories * servingSize);
     
@@ -563,7 +943,7 @@ async function updateStep4Display() {
   caloriesInput.placeholder = `Leave blank to use calculated: ${calculatedCals} cal`;
 }
 
-function processMainDishInput() {
+async function processMainDishInput() {
   const input = nodes.mainDish.value.trim().toLowerCase();
   
   // Try to find exact or partial match in database
@@ -581,20 +961,31 @@ function processMainDishInput() {
     });
     wizardState.mealCalories = calculateMealCalories();
   } else {
-    // No database match - clear selections for custom dish
-    wizardState.selectedDish = null;
-    wizardState.selectedIngredients = [];
-    wizardState.ingredientServingSizes = {};
-    wizardState.mealCalories = 0;
+    // Try Gemini/local lookup so step 3 can still show ingredients for custom dishes
+    const resolvedDish = await getFoodDetailsFromGemini(nodes.mainDish.value.trim());
+    if (resolvedDish && Array.isArray(resolvedDish.ingredients) && resolvedDish.ingredients.length > 0) {
+      wizardState.selectedDish = resolvedDish;
+      wizardState.selectedIngredients = [...resolvedDish.ingredients];
+      wizardState.ingredientServingSizes = {};
+      resolvedDish.ingredients.forEach(ing => {
+        wizardState.ingredientServingSizes[ing] = 1;
+      });
+      wizardState.mealCalories = calculateMealCalories();
+    } else {
+      // No database match and no ingredient resolution - clear selections for custom dish
+      wizardState.selectedDish = null;
+      wizardState.selectedIngredients = [];
+      wizardState.ingredientServingSizes = {};
+      wizardState.mealCalories = 0;
+    }
   }
 }
 
 function calculateMealCalories() {
-  const ingredientDb = DATA.ingredients || {};
   let totalCalories = 0;
   
   wizardState.selectedIngredients.forEach(ingredientName => {
-    const info = ingredientDb[ingredientName] || { baseCalories: 100 };
+    const info = resolveIngredientInfo(ingredientName);
     const servingSize = wizardState.ingredientServingSizes[ingredientName] || 1;
     totalCalories += info.baseCalories * servingSize;
   });
@@ -626,17 +1017,16 @@ async function estimateMealCaloriesWithGemini() {
 }
 
 function renderIngredientsEditor() {
-  if (!wizardState.selectedDish) {
+  if (!wizardState.selectedIngredients.length) {
     nodes.ingredientsEditor.innerHTML = '<div style="color: var(--muted); padding: 16px; text-align: center;">No matching dish found. Proceeding with custom dish entry.</div>';
     return;
   }
 
   // Group ingredients by category
-  const ingredientDb = DATA.ingredients || {};
   const grouped = {};
   
   wizardState.selectedIngredients.forEach(ingredientName => {
-    const info = ingredientDb[ingredientName] || { category: 'Other', baseCalories: 100, unit: 'serving' };
+    const info = resolveIngredientInfo(ingredientName);
     const category = info.category;
     if (!grouped[category]) {
       grouped[category] = [];
@@ -728,6 +1118,108 @@ function renderIngredientsEditor() {
   
   // Calculate and display total meal calories
   wizardState.mealCalories = calculateMealCalories();
+}
+
+function normalizeIngredientName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function estimateIngredientInfo(rawName) {
+  const name = normalizeIngredientName(rawName);
+
+  if (/(milkfish|bangus|tilapia|fish|isda|tuna)/.test(name)) {
+    return { category: 'Protein', baseCalories: 130, unit: 'piece/serving' };
+  }
+  if (/(chicken|manok|pork|beef|egg|itlog|liver)/.test(name)) {
+    return { category: 'Protein', baseCalories: 165, unit: 'piece/serving' };
+  }
+  if (/(rice|kanin|noodle|pancit|lugaw|sopas|bread|pandesal|flour|cornstarch)/.test(name)) {
+    return { category: 'Carb', baseCalories: 120, unit: 'serving' };
+  }
+  if (/(oil|mantika)/.test(name)) {
+    return { category: 'Liquid', baseCalories: 120, unit: 'tablespoon' };
+  }
+  if (/(vinegar|suka)/.test(name)) {
+    return { category: 'Liquid', baseCalories: 3, unit: 'tablespoon' };
+  }
+  if (/(soy sauce|toyo)/.test(name)) {
+    return { category: 'Liquid', baseCalories: 8, unit: 'tablespoon' };
+  }
+  if (/(garlic|bawang)/.test(name)) {
+    return { category: 'Vegetable', baseCalories: 4, unit: 'clove' };
+  }
+  if (/(onion|sibuyas)/.test(name)) {
+    return { category: 'Vegetable', baseCalories: 45, unit: 'medium' };
+  }
+  if (/(tomato|kamatis|okra|string beans|radish|eggplant|talong|vegetable)/.test(name)) {
+    return { category: 'Vegetable', baseCalories: 30, unit: 'cup' };
+  }
+  if (/(salt|asin)/.test(name)) {
+    return { category: 'Spice', baseCalories: 0, unit: 'teaspoon' };
+  }
+  if (/(peppercorn|black pepper|pepper|paminta|chili|ginger|luya)/.test(name)) {
+    return { category: 'Spice', baseCalories: 5, unit: 'teaspoon' };
+  }
+  return { category: 'Other', baseCalories: 80, unit: 'serving' };
+}
+
+function resolveIngredientInfo(rawName) {
+  const ingredientDb = DATA.ingredients || {};
+  const direct = ingredientDb[rawName];
+  if (direct) {
+    return direct;
+  }
+
+  const dbKeys = Object.keys(ingredientDb);
+  const normalizedRaw = normalizeIngredientName(rawName);
+  if (!normalizedRaw) {
+    return estimateIngredientInfo(rawName);
+  }
+  const normalizedRawNoSpace = normalizedRaw.replace(/\s+/g, '');
+
+  const parenMatch = String(rawName || '').match(/\(([^)]+)\)/);
+  const parenthetical = parenMatch ? parenMatch[1].trim() : '';
+  const withoutParen = String(rawName || '').replace(/\([^)]*\)/g, ' ').trim();
+
+  const aliases = {
+    milkfish: 'Bangus',
+    'cooking oil': 'Oil',
+    peppercorns: 'Black Pepper',
+  };
+
+  const candidateNames = [
+    String(rawName || '').trim(),
+    withoutParen,
+    parenthetical,
+    aliases[normalizedRaw] || '',
+  ].filter(Boolean);
+
+  for (const candidate of candidateNames) {
+    if (ingredientDb[candidate]) {
+      return ingredientDb[candidate];
+    }
+  }
+
+  for (const key of dbKeys) {
+    const normalizedKey = normalizeIngredientName(key);
+    const normalizedKeyNoSpace = normalizedKey.replace(/\s+/g, '');
+    if (!normalizedKey) continue;
+
+    if (
+      normalizedKey === normalizedRaw ||
+      normalizedKeyNoSpace === normalizedRawNoSpace ||
+      normalizedRaw.includes(normalizedKey) ||
+      normalizedKey.includes(normalizedRaw)
+    ) {
+      return ingredientDb[key];
+    }
+  }
+
+  return estimateIngredientInfo(rawName);
 }
 
 async function buildCustomDish(name, calories) {
