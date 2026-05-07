@@ -147,31 +147,33 @@ select:disabled {
 .app-shell {
   width: min(1220px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 28px 0 42px;
+  padding: clamp(24px, 4vw, 40px) 0 clamp(32px, 6vw, 56px);
   position: relative;
   z-index: 1;
 }
 
 .panel {
   background: #f3e4c2;
-  border: 0.6vw solid #d2b48c;
+  border: 1px solid var(--panel-border);
   box-shadow:
     0 0 0 1vw #bfa27a inset,
     0 0 0 1.6vw #8b6b45 inset;
-  padding: 2vw;
-  padding-left: 3vw;
-  padding-right: 3vw;
+  padding-block: clamp(20px, 2vw, 30px);
+  padding-inline: clamp(24px, 3vw, 40px);
+  display: grid;
+  gap: 18px;
   image-rendering: pixelated;
-  border: 1px solid var(--panel-border);
   backdrop-filter: blur(18px);
   border-radius: 28px;
-  margin-bottom: 16px;
+  margin-bottom: 28px;
 }
 .section-switcher {
   display: flex;
-  gap: 12px;
-  margin: 0 0 24px;
-  padding: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 28px;
+  padding: 16px;
   border-radius: 20px;
   background: rgba(10, 16, 29, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -180,10 +182,12 @@ select:disabled {
 
 .section-tab {
   flex: 1;
+  min-width: 140px;
+  padding: 12px 16px;
+  text-align: center;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
-  padding: 12px 16px;
   border-radius: 14px;
   cursor: pointer;
   font-weight: 700;
@@ -191,39 +195,29 @@ select:disabled {
   text-transform: uppercase;
 }
 
-.hero {
-  display: grid;
-  grid-template-columns: 1.8fr 1fr;
-  gap: 24px;
-  padding: 28px;
-  margin-bottom: 18px;
-  align-items: center;
-}
-
-
-section.hero.panel{
+section.hero.panel {
   position: relative;
-  padding-top: 2vw;
-  padding-left: 6vw;
-  padding-right: 6vw;
-  width: min(95vw, 1220px);
-  aspect-ratio: 8 / 2;      /* banner shape */
+  padding: clamp(24px, 4vw, 48px);
+  width: 100%;
+  max-width: 1220px;
+  margin: 0 auto 24px;
   background: #f3e4c2;
   border: 0.6vw solid #d2b48c;
   box-shadow:
     0 0 0 1vw #bfa27a inset,
     0 0 0 1.6vw #8b6b45 inset;
-  margin: 0 auto;           /* center the banner */
-  margin-bottom: 16px;
   image-rendering: pixelated;
 }
 
 .hero.panel {
-    display: flex;
-    flex-direction: column;
-    align-items: center; /* or center if you want centered layout */
-    gap:8px;
+  width: 100%;
 }
+
+.hero-copy {
+  display: grid;
+  gap: 18px;
+}
+
 .section-tab.active {
   background: linear-gradient(135deg, #ffbe55 0%, #77f4c5 100%);
   color: #10131f;
@@ -242,11 +236,6 @@ section.hero.panel{
 
 
 
-.hero-content {
-   display: flex;
-    flex-direction: column;   /* ← forces everything into one column */
-    gap: 1rem;                /* spacing between elements */
-}
 
 
 
@@ -274,7 +263,7 @@ section.hero.panel{
 #wellness-score, #player-title, #day-count {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #482619;
+  color: #593e11;
 }
 
 
@@ -379,9 +368,8 @@ section.hero.panel{
 
 .hero-meta div {
   padding: 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+    background: #d2b48c;
+    border: 5px solid rgb(104 67 41);
 }
 
 .meta-label {
@@ -397,6 +385,7 @@ section.hero.panel{
   display: grid;
   gap: 18px;
   justify-items: end;
+  min-width: 0;
 }
 
 .status-ring {
@@ -542,7 +531,9 @@ section.hero.panel{
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .panel-heading h2 {
@@ -1042,19 +1033,6 @@ section.panel.report-section{
   color: var(--muted);
   text-align: center;
 }
-
-.hero.panel {
-    width: 100%;
-}
-
-.hero-content {
-    width: 100%;
-}
-
-.hero-stat {
-    flex: 1;
-}
-
 
 .subtle-box {
   border-style: dashed;
