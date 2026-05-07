@@ -1,8 +1,8 @@
 const DATA = window.KARINDERYA_DATA;
 const STORAGE_KEY = 'karinderya-quest-state-v1';
 const GEMINI_CACHE_KEY = 'karinderya-gemini-cache-v1';
-const GEMINI_CACHE_TTL = 86400000; // 24 hours in milliseconds
-const LEVEL_THRESHOLDS = [0, 100, 250, 450, 700, 1000, 1350, 1750, 2200, 2700];
+const GEMINI_CACHE_TTL = 300; // 24 hours in milliseconds
+const LEVEL_THRESHOLDS = [0, 100, 250, 450, 700, 1000, 1350, 1750, 2200, 2700, 3300, 4000, 4750, 5550, 6400, 7300, 8250, 9250, 10350, 11500, 12750, 14100];
 const LEVEL_TITLES = [
   'Street Rookie',
   'Suman Scout',
@@ -13,7 +13,19 @@ const LEVEL_TITLES = [
   'Veggie Vanguard',
   'Feast Strategist',
   'Balance Sage',
-  'Nutrition Monk'
+  'Nutrition Monk',
+  'Health Samurai',
+  'Wellness Ninja',
+  'Dietary Alchemist',
+  'Food Philosopher',
+  'Culinary Tactician',
+  'Meal Mastermind',
+  'Ration Ronin',
+  'Sustenance Shogun',
+  'Gastronomy Guru',
+  'Karinderya King',
+  'Legendary Luto Lord',
+  'Mythical Menu Monarch'
 ];
 
 const STAT_META = [
@@ -62,6 +74,11 @@ const QUEST_DEFS = [
     goal: 3,
   },
 ];
+
+const ACTION_BUTTON_SELECTOR = '.step-next-btn, #meal-form button[type="submit"], .meal-form-wizard button[type="submit"], #login-form button[type="submit"], #signup-form button[type="submit"], #profile-form button[type="submit"]';
+
+let activeActionButton = null;
+let actionInFlight = false;
 
 // ============ Gemini Cache Management ============
 
@@ -178,14 +195,10 @@ async function getFoodDetailsFromGemini(foodName) {
     if (cached) {
       return cached;
     }
-    
-    // Try local database first (free lookup)
-    const localFood = DATA.foodItems.find(item => 
+
+    const localFood = DATA.foodItems.find(item =>
       item.name.toLowerCase() === normalizedName
     );
-    if (localFood) {
-      return localFood;
-    }
     
     // Only call Gemini if not in local database
     const prompt = `You are a Filipino food expert and nutritionist. For the dish "${foodName}", return a JSON object with ONLY these fields: name (string), category (string), calories (number), price (number in PHP), tags (array), ingredients (array of strings), effects (object with hp, energy, strength, defense, risk, xp as numbers 0-20). Consider typical preparation. Output ONLY valid JSON object, no other text.`;
@@ -214,9 +227,14 @@ async function getFoodDetailsFromGemini(foodName) {
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const food = JSON.parse(jsonMatch[0]);
+      const mergedFood = localFood ? {
+        ...localFood,
+        ...food,
+        ingredients: Array.isArray(food.ingredients) && food.ingredients.length ? food.ingredients : (localFood.ingredients || []),
+      } : food;
       // Cache the result
-      setCachedGeminiData(cacheKey, food, GEMINI_CACHE_TTL);
-      return food;
+      setCachedGeminiData(cacheKey, mergedFood, GEMINI_CACHE_TTL);
+      return mergedFood;
     }
     
     return localFood || null;
@@ -342,18 +360,22 @@ async function generateEffectsWithGemini(mealName, ingredients, calories) {
 const state = loadState();
 const nodes = {};
 let currentUser = null;
+let activeAppSection = 'nutrition';
 let wizardState = {
   currentStep: 1,
   selectedDish: null,
   selectedIngredients: [],
   mainDishInput: '',
   ingredientServingSizes: {}, // e.g. { 'Chicken': 1.5, 'Rice': 1 }
+  ingredientGeminiCache: {}, // Cache Gemini calorie estimates per ingredient
   mealCalories: 0,
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
   cacheNodes();
   bindEvents();
+  initializeSectionNavigation();
+  switchAppSection('settings');
   await initializeAccountManagement();
   syncDay();
   render();
@@ -405,6 +427,44 @@ function cacheNodes() {
   nodes.profileBirthdate = document.getElementById('profile-birthdate');
   nodes.profileHeight = document.getElementById('profile-height');
   nodes.profileWeight = document.getElementById('profile-weight');
+  nodes.deleteAccountBtn = document.getElementById('delete-account-btn');
+  
+  nodes.rankingsContainer = document.getElementById('rankings-container');
+  nodes.rewardsList = document.getElementById('rewards-list');
+  nodes.sectionSwitcher = document.getElementById('section-switcher');
+  nodes.nutritionSection = document.getElementById('nutrition-section');
+  nodes.rewardsSection = document.getElementById('rewards-section');
+  nodes.settingsSection = document.getElementById('settings-section');
+  nodes.sectionTabs = document.querySelectorAll('[data-app-section]');
+}
+
+function initializeSectionNavigation() {
+  if (!nodes.sectionTabs.length) return;
+
+  nodes.sectionTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      switchAppSection(tab.dataset.appSection);
+    });
+  });
+}
+
+function switchAppSection(sectionName) {
+  activeAppSection = ['nutrition', 'rewards', 'settings'].includes(sectionName) ? sectionName : 'settings';
+
+  if (nodes.nutritionSection) {
+    nodes.nutritionSection.classList.toggle('hidden', activeAppSection !== 'nutrition');
+  }
+  if (nodes.rewardsSection) {
+    nodes.rewardsSection.classList.toggle('hidden', activeAppSection !== 'rewards');
+  }
+  if (nodes.settingsSection) {
+    nodes.settingsSection.classList.toggle('hidden', activeAppSection !== 'settings');
+  }
+
+  nodes.sectionTabs.forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.appSection === activeAppSection);
+    tab.setAttribute('aria-pressed', String(tab.dataset.appSection === activeAppSection));
+  });
 }
 
 function bindEvents() {
@@ -419,19 +479,27 @@ function bindEvents() {
   document.querySelectorAll('.step-next-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
-      const nextStep = Number(btn.dataset.next);
-      if (nextStep === 2 && nodes.mealType.value === '') {
-        alert('Please select a meal type');
+      if (!beginActionLock(btn)) {
         return;
       }
-      if (nextStep === 3 && nodes.mainDish.value.trim() === '') {
-        alert('Please enter what you ate');
-        return;
+
+      try {
+        const nextStep = Number(btn.dataset.next);
+        if (nextStep === 2 && nodes.mealType.value === '') {
+          alert('Please select a meal type');
+          return;
+        }
+        if (nextStep === 3 && nodes.mainDish.value.trim() === '') {
+          alert('Please enter what you ate');
+          return;
+        }
+        if (nextStep === 3) {
+          await processMainDishInput();
+        }
+        goToStep(nextStep);
+      } finally {
+        endActionLock(btn);
       }
-      if (nextStep === 3) {
-        await processMainDishInput();
-      }
-      goToStep(nextStep);
     });
   });
 
@@ -519,10 +587,92 @@ function bindEvents() {
   });
 }
 
+async function callStateApi(action, payload = {}) {
+  const res = await fetch('api/state.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ action, ...payload }),
+  });
+
+  const data = await res.json().catch(() => ({ error: 'Invalid server response' }));
+  if (!res.ok || data.error) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+function beginActionLock(button) {
+  if (actionInFlight) {
+    return false;
+  }
+
+  actionInFlight = true;
+  activeActionButton = button || null;
+  setActionButtonsLocked(true, activeActionButton);
+  return true;
+}
+
+function endActionLock(button) {
+  if (button && activeActionButton && button !== activeActionButton) {
+    return;
+  }
+
+  actionInFlight = false;
+  setActionButtonsLocked(false, activeActionButton);
+  activeActionButton = null;
+}
+
+function setActionButtonsLocked(locked, activeButton = null) {
+  document.querySelectorAll(ACTION_BUTTON_SELECTOR).forEach((button) => {
+    const isActive = activeButton && button === activeButton;
+    button.disabled = locked;
+    button.classList.toggle('is-loading', locked && isActive);
+
+    if (!locked) {
+      restoreButtonLabel(button);
+      return;
+    }
+
+    if (!isActive) {
+      return;
+    }
+
+    if (button.tagName === 'BUTTON') {
+      if (!button.dataset.originalLabel) {
+        button.dataset.originalLabel = button.innerHTML;
+      }
+      const loadingLabel = button.dataset.loadingLabel || 'Loading...';
+      button.innerHTML = `<span class="button-spinner" aria-hidden="true"></span><span class="button-text">${loadingLabel}</span>`;
+    } else if (button.tagName === 'INPUT') {
+      if (!button.dataset.originalValue) {
+        button.dataset.originalValue = button.value;
+      }
+      button.value = 'Loading...';
+    }
+  });
+}
+
+function restoreButtonLabel(button) {
+  if (!button) return;
+
+  button.classList.remove('is-loading');
+  if (button.tagName === 'BUTTON' && button.dataset.originalLabel) {
+    button.innerHTML = button.dataset.originalLabel;
+    delete button.dataset.originalLabel;
+  }
+
+  if (button.tagName === 'INPUT' && button.dataset.originalValue) {
+    button.value = button.dataset.originalValue;
+    delete button.dataset.originalValue;
+  }
+}
+
 async function callAccountApi(action, payload = {}) {
   const res = await fetch('api/account.php', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({ action, ...payload }),
   });
 
@@ -575,15 +725,20 @@ function setAuthState(user) {
   nodes.loginForm.classList.toggle('hidden', isLoggedIn);
   nodes.signupForm.classList.add('hidden');
   nodes.authToggle.classList.toggle('hidden', isLoggedIn);
+  if (nodes.sectionSwitcher) {
+    nodes.sectionSwitcher.classList.toggle('hidden', !isLoggedIn);
+  }
 
   if (isLoggedIn) {
     applyUserToProfile(currentUser);
     showAuthStatus(`Logged in as ${currentUser.username}`, 'ok');
     setMealLoggingEnabled(true);
+    switchAppSection('nutrition');
   } else {
     switchAuthView('login');
     showAuthStatus('Log in to start saving meals and tracking your profile.', 'error');
     setMealLoggingEnabled(false);
+    switchAppSection('settings');
   }
 }
 
@@ -601,20 +756,31 @@ async function initializeAccountManagement() {
 
   nodes.loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const submitButton = e.submitter || nodes.loginForm.querySelector('button[type="submit"]');
+    if (!beginActionLock(submitButton)) {
+      return;
+    }
     try {
       const data = await callAccountApi('login', {
         email: nodes.loginEmail.value.trim(),
         password: nodes.loginPassword.value,
       });
       setAuthState(data.user);
+      render();
       nodes.loginForm.reset();
     } catch (err) {
       showAuthStatus(err.message, 'error');
+    } finally {
+      endActionLock(submitButton);
     }
   });
 
   nodes.signupForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const submitButton = e.submitter || nodes.signupForm.querySelector('button[type="submit"]');
+    if (!beginActionLock(submitButton)) {
+      return;
+    }
     try {
       const data = await callAccountApi('register', {
         username: nodes.signupUsername.value.trim(),
@@ -625,14 +791,21 @@ async function initializeAccountManagement() {
         weight_kg: Number(nodes.signupWeight.value),
       });
       setAuthState(data.user);
+      render();
       nodes.signupForm.reset();
     } catch (err) {
       showAuthStatus(err.message, 'error');
+    } finally {
+      endActionLock(submitButton);
     }
   });
 
   nodes.profileForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const submitButton = e.submitter || nodes.profileForm.querySelector('button[type="submit"]');
+    if (!beginActionLock(submitButton)) {
+      return;
+    }
     try {
       const data = await callAccountApi('update_profile', {
         birthdate: nodes.profileBirthdate.value,
@@ -640,9 +813,12 @@ async function initializeAccountManagement() {
         weight_kg: Number(nodes.profileWeight.value),
       });
       setAuthState(data.user);
+      render();
       showAuthStatus('Profile updated successfully.', 'ok');
     } catch (err) {
       showAuthStatus(err.message, 'error');
+    } finally {
+      endActionLock(submitButton);
     }
   });
 
@@ -650,14 +826,45 @@ async function initializeAccountManagement() {
     try {
       await callAccountApi('logout');
       setAuthState(null);
+      render();
     } catch (err) {
       showAuthStatus(err.message, 'error');
+    }
+  });
+
+  nodes.deleteAccountBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const confirmed = confirm('⚠️ This will permanently delete all your meals, quest progress, and reset your account to the beginning. Are you sure?');
+    if (!confirmed) return;
+
+    const confirmed2 = confirm('Are you really sure? This action cannot be undone.');
+    if (!confirmed2) return;
+
+    if (!beginActionLock(nodes.deleteAccountBtn)) {
+      return;
+    }
+
+    try {
+      await callAccountApi('delete_all_data');
+      // Clear all local storage
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(GEMINI_CACHE_KEY);
+      // Logout and reset
+      await callAccountApi('logout');
+      setAuthState(null);
+      alert('✅ Your account has been reset successfully. All data has been deleted.');
+      render();
+    } catch (err) {
+      showAuthStatus('Error deleting data: ' + err.message, 'error');
+    } finally {
+      endActionLock(nodes.deleteAccountBtn);
     }
   });
 
   try {
     const me = await callAccountApi('me');
     setAuthState(me.user || null);
+    render();
   } catch {
     setAuthState(null);
   }
@@ -728,71 +935,99 @@ function syncDay() {
 async function handleMealSubmit(event) {
   event.preventDefault();
 
-  if (!currentUser) {
-    showAuthStatus('Please log in first before logging meals.', 'error');
+  const submitButton = event.submitter || nodes.mealForm.querySelector('button[type="submit"]');
+  if (!beginActionLock(submitButton)) {
     return;
   }
 
-  let dish;
-  let calculatedCalories = 0;
-  
-  if (wizardState.selectedDish) {
-    // Use database dish with Gemini-estimated calories
-    dish = wizardState.selectedDish;
-    calculatedCalories = await estimateMealCaloriesWithGemini();
-  } else {
-    // Build custom dish with Gemini-generated effects
-    const customName = nodes.customDish.value.trim();
-    const customCalories = Number(nodes.customCalories.value);
-    dish = await buildCustomDish(
-      customName || nodes.mainDish.value.trim(),
-      Number.isFinite(customCalories) && customCalories > 0 ? customCalories : null
-    );
-    calculatedCalories = dish.calories;
+  try {
+    if (!currentUser) {
+      showAuthStatus('Please log in first before logging meals.', 'error');
+      return;
+    }
+
+    let dish;
+    let calculatedCalories = 0;
+    
+    if (wizardState.selectedDish) {
+      // Use database dish with Gemini-estimated calories
+      dish = wizardState.selectedDish;
+      calculatedCalories = await estimateMealCaloriesWithGemini();
+    } else {
+      // Build custom dish with Gemini-generated effects
+      const customName = nodes.customDish.value.trim();
+      const customCalories = Number(nodes.customCalories.value);
+      dish = await buildCustomDish(
+        customName || nodes.mainDish.value.trim(),
+        Number.isFinite(customCalories) && customCalories > 0 ? customCalories : null
+      );
+      calculatedCalories = dish.calories;
+    }
+
+    // Allow user to override calculated calories in custom calories field
+    const overrideCalories = Number(nodes.customCalories.value);
+    const finalCalories = Number.isFinite(overrideCalories) && overrideCalories > 0 ? overrideCalories : calculatedCalories;
+
+    // Ensure effects are set (use Gemini effects if available, otherwise use dish effects)
+    let finalEffects = dish.effects;
+    if (!finalEffects || !finalEffects.hp) {
+      const geminiEffects = await generateEffectsWithGemini(dish.name, wizardState.selectedIngredients, finalCalories);
+      finalEffects = geminiEffects || { hp: 6, energy: 5, strength: 3, defense: 3, risk: 2, xp: 12 };
+    }
+
+    const entry = {
+      id: createEntryId(),
+      mealType: nodes.mealType.value,
+      name: dish.name,
+      category: dish.category,
+      calories: finalCalories,
+      price: dish.price,
+      effects: finalEffects,
+      tags: dish.tags,
+      ingredients: wizardState.selectedIngredients.filter(i => i.trim()),
+      ingredientServingSizes: { ...wizardState.ingredientServingSizes },
+      ingredientBreakdown: buildIngredientBreakdown(),
+      source: wizardState.selectedDish ? 'database' : 'custom',
+      createdAt: new Date().toISOString(),
+    };
+
+    let canonicalEntry = entry;
+
+    // Server-side: Log meal to database and update quest progress
+    try {
+      const result = await callStateApi('log_meal', { meal: entry });
+      if (result && result.meal) {
+        canonicalEntry = {
+          ...entry,
+          ...result.meal,
+          effects: result.meal.effects || entry.effects,
+          ingredientBreakdown: Array.isArray(result.meal.ingredientBreakdown) ? result.meal.ingredientBreakdown : entry.ingredientBreakdown,
+          tags: Array.isArray(result.meal.tags) ? result.meal.tags : entry.tags,
+        };
+      }
+    } catch (err) {
+      console.error('Error logging meal to server:', err);
+      showAuthStatus('Error saving meal to server. Local save only.', 'error');
+    }
+
+    state.logs.unshift(canonicalEntry);
+    applyEffects(canonicalEntry.effects);
+    awardMealXp(canonicalEntry.effects.xp || 10);
+    awardQuestXp();
+    persist();
+    render();
+    
+    // Send meal to Gemini summarization (non-blocking)
+    if (typeof sendToGemini === 'function') {
+      sendToGemini(canonicalEntry).catch(() => {});
+    }
+
+    // Reset wizard
+    resetWizard();
+    goToStep(1);
+  } finally {
+    endActionLock(submitButton);
   }
-
-  // Allow user to override calculated calories in custom calories field
-  const overrideCalories = Number(nodes.customCalories.value);
-  const finalCalories = Number.isFinite(overrideCalories) && overrideCalories > 0 ? overrideCalories : calculatedCalories;
-
-  // Ensure effects are set (use Gemini effects if available, otherwise use dish effects)
-  let finalEffects = dish.effects;
-  if (!finalEffects || !finalEffects.hp) {
-    const geminiEffects = await generateEffectsWithGemini(dish.name, wizardState.selectedIngredients, finalCalories);
-    finalEffects = geminiEffects || { hp: 6, energy: 5, strength: 3, defense: 3, risk: 2, xp: 12 };
-  }
-
-  const entry = {
-    id: createEntryId(),
-    mealType: nodes.mealType.value,
-    name: dish.name,
-    category: dish.category,
-    calories: finalCalories,
-    price: dish.price,
-    effects: finalEffects,
-    tags: dish.tags,
-    ingredients: wizardState.selectedIngredients.filter(i => i.trim()),
-    ingredientServingSizes: { ...wizardState.ingredientServingSizes },
-    ingredientBreakdown: buildIngredientBreakdown(),
-    source: wizardState.selectedDish ? 'database' : 'custom',
-    createdAt: new Date().toISOString(),
-  };
-
-  state.logs.unshift(entry);
-  applyEffects(entry.effects);
-  awardMealXp(entry.effects.xp || 10);
-  awardQuestXp();
-  persist();
-  render();
-  
-  // Send meal to Gemini summarization (non-blocking)
-  if (typeof sendToGemini === 'function') {
-    sendToGemini(entry).catch(() => {});
-  }
-
-  // Reset wizard
-  resetWizard();
-  goToStep(1);
 }
 
 // Send meal entry to server-side Gemini proxy to generate a short summary - with caching
@@ -824,7 +1059,7 @@ async function sendToGemini(entry) {
 
     const prompt = `You are a helpful nutrition assistant. Given the meal log JSON below, return a concise summary (1-2 sentences), list the top 2 benefits, and suggest one micro-tip to make the meal healthier. Output as JSON with keys: summary, benefits (array of strings), tip.\n\nMeal JSON:\n${mealJson}`;
 
-    const res = await fetch('/api/gemini.php', {
+    const res = await fetch('api/gemini.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: prompt }),
@@ -943,9 +1178,53 @@ async function updateStep4Display() {
   caloriesInput.placeholder = `Leave blank to use calculated: ${calculatedCals} cal`;
 }
 
+async function getIngredientCaloriesFromGemini(ingredients) {
+  if (!ingredients || ingredients.length === 0) return {};
+
+  const cacheKey = `ingredient_cals_${ingredients.map(i => i.toLowerCase().trim()).sort().join('_')}`;
+  const cached = getCachedGeminiData(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const ingredientList = ingredients.join(', ');
+    const prompt = `You are a Filipino food nutritionist. For each ingredient in this list, estimate the calorie content per standard serving in Filipino cuisine: ${ingredientList}. Return ONLY a JSON object with ingredient names as keys and calorie numbers as values (e.g., {"Chicken": 165, "Rice": 120, "Oil": 120}). Each value should be the calories for a typical serving used in Filipino cooking. Be specific and varied - do not use the same value for different ingredients. Output ONLY valid JSON, no other text.`;
+
+    const res = await fetch('api/gemini.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: prompt }),
+    });
+
+    if (!res.ok) {
+      console.warn('Gemini ingredient cal estimate failed:', res.status);
+      return {};
+    }
+
+    const json = await res.json();
+    let responseText = '';
+    if (json.candidates?.[0]?.content?.parts?.[0]) {
+      responseText = json.candidates[0].content.parts[0].text || '';
+    }
+
+    if (!responseText.trim()) {
+      console.warn('Empty response from Gemini for ingredient calories');
+      return {};
+    }
+
+    const parsed = JSON.parse(responseText);
+    setCachedGeminiData(cacheKey, parsed, GEMINI_CACHE_TTL);
+    return parsed;
+  } catch (err) {
+    console.error('Error getting ingredient calories from Gemini:', err);
+    return {};
+  }
+}
+
 async function processMainDishInput() {
   const input = nodes.mainDish.value.trim().toLowerCase();
-  
+
   // Try to find exact or partial match in database
   const match = DATA.foodItems.find(item => 
     item.name.toLowerCase() === input || item.name.toLowerCase().includes(input)
@@ -953,13 +1232,17 @@ async function processMainDishInput() {
 
   if (match) {
     wizardState.selectedDish = match;
-    wizardState.selectedIngredients = [...(match.ingredients || [])];
-    // Initialize serving sizes to 1x for all ingredients
+    const resolvedDish = await getFoodDetailsFromGemini(match.name);
+    const resolvedIngredients = Array.isArray(resolvedDish?.ingredients) && resolvedDish.ingredients.length
+      ? resolvedDish.ingredients
+      : (match.ingredients || []);
+
+    wizardState.selectedIngredients = [...resolvedIngredients];
     wizardState.ingredientServingSizes = {};
-    match.ingredients.forEach(ing => {
+    resolvedIngredients.forEach(ing => {
       wizardState.ingredientServingSizes[ing] = 1;
     });
-    wizardState.mealCalories = calculateMealCalories();
+    wizardState.mealCalories = Number(resolvedDish?.calories) > 0 ? Number(resolvedDish.calories) : calculateMealCalories();
   } else {
     // Try Gemini/local lookup so step 3 can still show ingredients for custom dishes
     const resolvedDish = await getFoodDetailsFromGemini(nodes.mainDish.value.trim());
@@ -977,6 +1260,30 @@ async function processMainDishInput() {
       wizardState.selectedIngredients = [];
       wizardState.ingredientServingSizes = {};
       wizardState.mealCalories = 0;
+    }
+  }
+
+  // Fetch Gemini calorie estimates for all ingredients
+  if (wizardState.selectedIngredients.length > 0) {
+    const geminiCals = await getIngredientCaloriesFromGemini(wizardState.selectedIngredients);
+    if (Object.keys(geminiCals).length > 0) {
+      // Initialize cache for this batch of ingredients
+      if (!wizardState.ingredientGeminiCache) {
+        wizardState.ingredientGeminiCache = {};
+      }
+      // Update cache with Gemini estimates
+      wizardState.selectedIngredients.forEach(ing => {
+        if (geminiCals[ing]) {
+          wizardState.ingredientGeminiCache[ing] = {
+            category: resolveIngredientInfo(ing).category,
+            baseCalories: geminiCals[ing],
+            unit: 'serving',
+            needsGemini: false
+          };
+        }
+      });
+      // Recalculate with new Gemini values
+      wizardState.mealCalories = calculateMealCalories();
     }
   }
 }
@@ -1102,7 +1409,7 @@ function renderIngredientsEditor() {
   // Bind add button
   const addBtn = nodes.ingredientsEditor.querySelector('.ingredient-add-btn');
   if (addBtn) {
-    addBtn.addEventListener('click', (e) => {
+    addBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       const newIngredient = prompt('Enter ingredient name (or choose from: Chicken, Pork, Rice, Onion, Garlic, Tomato, Oil, etc.):');
       if (newIngredient && newIngredient.trim()) {
@@ -1110,6 +1417,20 @@ function renderIngredientsEditor() {
         if (!wizardState.selectedIngredients.includes(trimmed)) {
           wizardState.selectedIngredients.push(trimmed);
           wizardState.ingredientServingSizes[trimmed] = 1;
+          // Fetch Gemini estimate for the new ingredient
+          const geminiCals = await getIngredientCaloriesFromGemini([trimmed]);
+          if (geminiCals[trimmed]) {
+            if (!wizardState.ingredientGeminiCache) {
+              wizardState.ingredientGeminiCache = {};
+            }
+            wizardState.ingredientGeminiCache[trimmed] = {
+              category: resolveIngredientInfo(trimmed).category,
+              baseCalories: geminiCals[trimmed],
+              unit: 'serving',
+              needsGemini: false
+            };
+            wizardState.mealCalories = calculateMealCalories();
+          }
         }
         renderIngredientsEditor();
       }
@@ -1131,40 +1452,37 @@ function normalizeIngredientName(value) {
 function estimateIngredientInfo(rawName) {
   const name = normalizeIngredientName(rawName);
 
+  // Check if we have cached Gemini estimate for this ingredient
+  if (wizardState.ingredientGeminiCache && wizardState.ingredientGeminiCache[rawName]) {
+    return wizardState.ingredientGeminiCache[rawName];
+  }
+
+  // Fallback to category detection for unit classification
+  let category = 'Other';
   if (/(milkfish|bangus|tilapia|fish|isda|tuna)/.test(name)) {
-    return { category: 'Protein', baseCalories: 130, unit: 'piece/serving' };
+    category = 'Protein';
+  } else if (/(chicken|manok|pork|beef|egg|itlog|liver)/.test(name)) {
+    category = 'Protein';
+  } else if (/(rice|kanin|noodle|pancit|lugaw|sopas|bread|pandesal|flour|cornstarch)/.test(name)) {
+    category = 'Carb';
+  } else if (/(oil|mantika)/.test(name)) {
+    category = 'Liquid';
+  } else if (/(vinegar|suka|soy sauce|toyo)/.test(name)) {
+    category = 'Liquid';
+  } else if (/(garlic|bawang|onion|sibuyas|tomato|kamatis|okra|string beans|radish|eggplant|talong|vegetable)/.test(name)) {
+    category = 'Vegetable';
+  } else if (/(salt|asin|peppercorn|black pepper|pepper|paminta|chili|ginger|luya)/.test(name)) {
+    category = 'Spice';
   }
-  if (/(chicken|manok|pork|beef|egg|itlog|liver)/.test(name)) {
-    return { category: 'Protein', baseCalories: 165, unit: 'piece/serving' };
-  }
-  if (/(rice|kanin|noodle|pancit|lugaw|sopas|bread|pandesal|flour|cornstarch)/.test(name)) {
-    return { category: 'Carb', baseCalories: 120, unit: 'serving' };
-  }
-  if (/(oil|mantika)/.test(name)) {
-    return { category: 'Liquid', baseCalories: 120, unit: 'tablespoon' };
-  }
-  if (/(vinegar|suka)/.test(name)) {
-    return { category: 'Liquid', baseCalories: 3, unit: 'tablespoon' };
-  }
-  if (/(soy sauce|toyo)/.test(name)) {
-    return { category: 'Liquid', baseCalories: 8, unit: 'tablespoon' };
-  }
-  if (/(garlic|bawang)/.test(name)) {
-    return { category: 'Vegetable', baseCalories: 4, unit: 'clove' };
-  }
-  if (/(onion|sibuyas)/.test(name)) {
-    return { category: 'Vegetable', baseCalories: 45, unit: 'medium' };
-  }
-  if (/(tomato|kamatis|okra|string beans|radish|eggplant|talong|vegetable)/.test(name)) {
-    return { category: 'Vegetable', baseCalories: 30, unit: 'cup' };
-  }
-  if (/(salt|asin)/.test(name)) {
-    return { category: 'Spice', baseCalories: 0, unit: 'teaspoon' };
-  }
-  if (/(peppercorn|black pepper|pepper|paminta|chili|ginger|luya)/.test(name)) {
-    return { category: 'Spice', baseCalories: 5, unit: 'teaspoon' };
-  }
-  return { category: 'Other', baseCalories: 80, unit: 'serving' };
+
+  // Return placeholder with Gemini cache key so we can update it later
+  return { 
+    category, 
+    baseCalories: 100,  // Placeholder, will be overridden by Gemini
+    unit: 'serving',
+    needsGemini: true,  // Flag to indicate we need Gemini estimate
+    originalName: rawName
+  };
 }
 
 function resolveIngredientInfo(rawName) {
@@ -1227,18 +1545,39 @@ async function buildCustomDish(name, calories) {
   const baseEffects = { hp: 6, energy: 5, strength: 3, defense: 3, risk: 2, xp: 12 };
   const tags = ['custom'];
   let category = 'Custom';
-  let price = calories ? Math.max(15, Math.round(calories / 8)) : 35;
+  const resolvedDish = await getFoodDetailsFromGemini(name);
+  const resolvedIngredients = Array.isArray(resolvedDish?.ingredients) ? resolvedDish.ingredients : [];
+  const geminiCalories = Number(resolvedDish?.calories) || 0;
+  const finalCalories = Number.isFinite(calories) && calories > 0 ? calories : (geminiCalories || 300);
+  let price = Number(resolvedDish?.price) > 0 ? Number(resolvedDish.price) : (finalCalories ? Math.max(15, Math.round(finalCalories / 8)) : 35);
+
+  if (Array.isArray(resolvedDish?.tags) && resolvedDish.tags.length) {
+    tags.push(...resolvedDish.tags.map(tag => String(tag).toLowerCase()).filter(Boolean));
+  }
+
+  if (resolvedDish?.category) {
+    category = String(resolvedDish.category);
+  }
+
+  if (resolvedIngredients.length) {
+    wizardState.selectedIngredients = [...resolvedIngredients];
+    wizardState.ingredientServingSizes = {};
+    resolvedIngredients.forEach((ing) => {
+      wizardState.ingredientServingSizes[ing] = 1;
+    });
+  }
 
   // Try to get effects from Gemini
-  const geminiEffects = await generateEffectsWithGemini(name, [], calories || 300);
+  const geminiEffects = await generateEffectsWithGemini(name, resolvedIngredients, finalCalories);
   if (geminiEffects) {
     return {
       name: name.trim(),
       category: 'Custom (AI Generated)',
-      calories: calories || 300,
+      calories: finalCalories,
       price,
       effects: geminiEffects,
       tags,
+      ingredients: resolvedIngredients,
     };
   }
 
@@ -1279,7 +1618,7 @@ async function buildCustomDish(name, calories) {
     tags.push('broth', 'vegetable');
   }
 
-  const inferredCalories = calories || Math.max(120, Math.round((effects.energy + effects.strength + effects.hp) * 18));
+  const inferredCalories = finalCalories || Math.max(120, Math.round((effects.energy + effects.strength + effects.hp) * 18));
 
   return {
     name: name.trim(),
@@ -1288,6 +1627,7 @@ async function buildCustomDish(name, calories) {
     price,
     effects,
     tags,
+    ingredients: resolvedIngredients,
   };
 }
 
@@ -1323,17 +1663,44 @@ function render() {
   renderReport(questState);
   renderBudgetSuggestions();
   renderFoodDatabase();
+  renderRankings();
+  renderRewards();
   renderMealLog();
   renderArchive();
 }
 
-function renderHero() {
+async function renderHero() {
+  if (currentUser) {
+    try {
+      const data = await callStateApi('statistics');
+      const user = data.user || currentUser;
+      const summary = data.summary || {};
+      const xpValue = Number(user.xp || 0);
+      const levelInfo = getLevelInfo(xpValue);
+      const nextThreshold = LEVEL_THRESHOLDS[levelInfo.level] || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1] + 500;
+      const currentThreshold = LEVEL_THRESHOLDS[levelInfo.level - 1] || 0;
+      const progress = Math.min(1, (xpValue - currentThreshold) / Math.max(1, nextThreshold - currentThreshold));
+
+      const streakValue = Number(user.day_count || 0);
+      nodes.dayCount.textContent = `${streakValue} day${streakValue === 1 ? '' : 's'}`;
+      nodes.playerTitle.textContent = levelInfo.title;
+      nodes.playerLevel.textContent = String(levelInfo.level);
+      nodes.wellnessScore.textContent = String(user.wellness_score ?? summary.wellness_score ?? 0);
+      nodes.xpLabel.textContent = `${xpValue} / ${nextThreshold}`;
+      nodes.xpFill.style.width = `${Math.round(progress * 100)}%`;
+      return;
+    } catch (err) {
+      console.warn('Server hero stats unavailable, falling back to local state', err);
+    }
+  }
+
   const levelInfo = getLevelInfo(state.xp);
   const nextThreshold = LEVEL_THRESHOLDS[levelInfo.level] || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1] + 500;
   const currentThreshold = LEVEL_THRESHOLDS[levelInfo.level - 1] || 0;
   const progress = Math.min(1, (state.xp - currentThreshold) / Math.max(1, nextThreshold - currentThreshold));
 
-  nodes.dayCount.textContent = `Day ${state.dayCount}`;
+  const fallbackStreak = Number(state.dayCount || 0);
+  nodes.dayCount.textContent = `${fallbackStreak} day${fallbackStreak === 1 ? '' : 's'}`;
   nodes.playerTitle.textContent = levelInfo.title;
   nodes.playerLevel.textContent = String(levelInfo.level);
   nodes.wellnessScore.textContent = String(getWellnessScore());
@@ -1341,22 +1708,59 @@ function renderHero() {
   nodes.xpFill.style.width = `${Math.round(progress * 100)}%`;
 }
 
-function renderStats() {
+async function renderStats() {
+  if (currentUser) {
+    try {
+      const data = await callStateApi('statistics');
+      const stats = data.stats || null;
+      if (stats) {
+        nodes.statsGrid.innerHTML = STAT_META.map((stat) => {
+          const value = stats[stat.key] || 0;
+          const max = 100;
+          const percent = Math.round((value / max) * 100);
+          return `
+            <div class="stat-card">
+              <div class="stat-label">${stat.label}</div>
+              <div class="stat-bar">
+                <div class="stat-fill" style="width:${percent}%; background: ${stat.accent};"></div>
+              </div>
+              <div class="stat-value">${value}</div>
+            </div>
+          `;
+        }).join('');
+        return;
+      }
+    } catch (err) {
+      console.warn('Server stats unavailable, falling back to local state', err);
+    }
+  }
+
   nodes.statsGrid.innerHTML = STAT_META.map((stat) => {
-    const value = state.stats[stat.key];
+    const value = state.stats[stat.key] || 0;
+    const max = 100;
+    const percent = Math.round((value / max) * 100);
     return `
-      <article class="stat-card">
-        <div class="stat-head">
-          <span>${stat.label}</span>
-          <strong>${value}</strong>
+      <div class="stat-card">
+        <div class="stat-label">${stat.label}</div>
+        <div class="stat-bar">
+          <div class="stat-fill" style="width:${percent}%; background: ${stat.accent};"></div>
         </div>
-        <div class="bar-track"><div class="bar-fill" style="width:${value}%; background:${stat.accent};"></div></div>
-      </article>
+        <div class="stat-value">${value}</div>
+      </div>
     `;
   }).join('');
 }
 
 function renderQuests(questState) {
+  // Fetch server quests if logged in, otherwise use client-side calculation
+  if (currentUser) {
+    fetchAndRenderServerQuests();
+  } else {
+    renderClientQuests(questState);
+  }
+}
+
+function renderClientQuests(questState) {
   nodes.questList.innerHTML = QUEST_DEFS.map((quest) => {
     const done = quest.completed(questState);
     const progress = quest.progress(questState);
@@ -1380,6 +1784,62 @@ function renderQuests(questState) {
       </article>
     `;
   }).join('');
+}
+
+async function fetchAndRenderServerQuests() {
+  try {
+    const data = await callStateApi('get_daily_quests');
+    const quests = data.quests || [];
+    
+    nodes.questList.innerHTML = quests.map((quest) => {
+      const percent = Math.min(100, Math.round((quest.progress / quest.goal) * 100));
+      const claimed = Boolean(quest.claimed) || state.rewardedQuestIds.includes(quest.code);
+      return `
+        <article class="quest-card ${quest.completed ? 'is-complete' : ''} ${claimed ? 'is-claimed' : ''}">
+          <div class="quest-top">
+            <div>
+              <h3>${quest.title}</h3>
+              <p>${quest.description}</p>
+            </div>
+            <span class="reward">+${quest.reward} XP</span>
+          </div>
+          <div class="quest-progress">
+            <div class="bar-track"><div class="bar-fill" style="width:${percent}%"></div></div>
+            <div class="quest-meta">
+              <span>${quest.completed ? 'Completed' : `${quest.progress} / ${quest.goal}`}</span>
+              ${quest.completed && !claimed ? `<button class="quest-claim-btn" data-quest-id="${quest.id}" data-quest-code="${quest.code}">Claim Reward</button>` : claimed ? `<span>Reward claimed</span>` : `<span>Quest active</span>`}
+            </div>
+          </div>
+        </article>
+      `;
+    }).join('');
+    
+    // Bind claim reward buttons
+    nodes.questList.querySelectorAll('.quest-claim-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const questId = Number(btn.dataset.questId);
+        const questCode = btn.dataset.questCode || '';
+        try {
+          const result = await callStateApi('claim_quest', { quest_id: questId });
+          showAuthStatus(`Claimed quest reward! +${result.xpRewarded} XP`, 'ok');
+          state.xp += result.xpRewarded;
+          if (questCode && !state.rewardedQuestIds.includes(questCode)) {
+            state.rewardedQuestIds.push(questCode);
+          }
+          persist();
+          render();
+        } catch (err) {
+          showAuthStatus(`Error claiming reward: ${err.message}`, 'error');
+        }
+      });
+    });
+  } catch (err) {
+    console.error('Error fetching server quests:', err);
+    // Fallback to client-side quests
+    const questState = computeQuestState();
+    renderClientQuests(questState);
+  }
 }
 
 function renderReport(questState) {
@@ -1444,13 +1904,168 @@ function renderFoodDatabase() {
   `).join('');
 }
 
-function renderMealLog() {
-  if (!state.logs.length) {
+async function renderRankings() {
+  try {
+    // Only fetch from server if user is authenticated
+    if (!currentUser) {
+      nodes.rankingsContainer.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--muted);">Please log in to see rankings.</div>';
+      return;
+    }
+
+    const data = await callStateApi('rankings');
+    const rankings = data.rankings || {};
+
+    let html = '<div class="rankings-grid">';
+
+    // Render each ranking type
+    ['levels', 'wellness', 'dayStreak', 'quests'].forEach(key => {
+      const ranking = rankings[key];
+      if (!ranking) return;
+
+      html += `
+        <div class="ranking-section">
+          <div class="ranking-header">
+            <h3>${ranking.title}</h3>
+            <span class="ranking-unit">${ranking.unit}</span>
+          </div>
+          
+          <div class="ranking-current">
+            <div class="ranking-item current-user">
+              <div class="ranking-position">
+                <span class="position-text">Your Rank</span>
+                ${ranking.current.rank ? `<span class="position-number">#${ranking.current.rank}</span>` : '<span class="position-number">--</span>'}
+              </div>
+              <div class="ranking-name">${ranking.current.name}</div>
+              <div class="ranking-value">${ranking.current.value} ${ranking.unit}</div>
+            </div>
+          </div>
+          
+          <div class="ranking-board">
+            <div class="ranking-board-title">Top 10</div>
+            ${ranking.board.map((entry, idx) => {
+              const isCurrentUser = entry.type === 'real' && entry.name === ranking.current.name;
+              const className = `ranking-item ${entry.type === 'pseudo' ? 'pseudo-user' : 'real-user'} ${isCurrentUser ? 'current-user' : ''}`;
+              return `
+                <div class="${className}">
+                  <div class="ranking-position">
+                    <span class="position-number">#${idx + 1}</span>
+                  </div>
+                  <div class="ranking-name">${entry.name}</div>
+                  <div class="ranking-value">${entry.value} ${ranking.unit}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    nodes.rankingsContainer.innerHTML = html;
+  } catch (err) {
+    // Provide clearer feedback for common server responses
+    console.warn('Error rendering rankings:', err);
+    const msg = String(err?.message || err);
+    if (msg.includes('User not found') || msg.toLowerCase().includes('unauthorized')) {
+      nodes.rankingsContainer.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--muted);">Please log in to see rankings.</div>';
+      return;
+    }
+    if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
+      nodes.rankingsContainer.innerHTML = '<div style="padding: 20px; color: var(--muted);">Rankings endpoint not found on the server (404). Verify the deployed path and that api/state.php exists.</div>';
+      return;
+    }
+
+    nodes.rankingsContainer.innerHTML = '<div style="padding: 20px; color: var(--muted);">Error loading rankings.</div>';
+  }
+}
+
+async function renderRewards() {
+  if (!currentUser) {
+    nodes.rewardsList.innerHTML = '<div class="empty-state subtle-box">Log in to unlock milestone rewards and healthy food vouchers.</div>';
+    return;
+  }
+
+  try {
+    const data = await callStateApi('rewards');
+    const rewards = data.rewards || [];
+
+    if (!rewards.length) {
+      nodes.rewardsList.innerHTML = '<div class="empty-state subtle-box">No rewards are available yet. Keep building your streak and level.</div>';
+      return;
+    }
+
+    nodes.rewardsList.innerHTML = rewards.map((reward) => {
+      const rewardInfo = reward.reward_json || {};
+      const isClaimed = reward.status === 'claimed';
+      const isUnlocked = reward.status === 'unlocked';
+      const triggerLabel = reward.trigger_type === 'level' ? `Reach level ${reward.trigger_value}` : reward.trigger_type === 'streak' ? `${reward.trigger_value}-day streak` : 'Top wellness score today';
+      return `
+        <article class="reward-card ${isClaimed ? 'is-claimed' : isUnlocked ? 'is-unlocked' : 'is-locked'}">
+          <div class="reward-top">
+            <div>
+              <h3>${rewardInfo.title || reward.title}</h3>
+              <p>${rewardInfo.summary || reward.description}</p>
+            </div>
+            <span class="reward-tag">${reward.reward_kind}</span>
+          </div>
+          <div class="reward-meta">
+            <span>Unlock: ${triggerLabel}</span>
+            <span>${isClaimed ? 'Claimed' : isUnlocked ? 'Ready to claim' : 'Locked'}</span>
+          </div>
+          ${rewardInfo.voucher_code ? `<div class="reward-code"><strong>${rewardInfo.voucher_code}</strong><span>${rewardInfo.voucher_details || ''}</span></div>` : ''}
+          ${isUnlocked && !isClaimed ? `<button type="button" class="reward-claim-btn" data-reward-id="${reward.id}">Claim Reward</button>` : ''}
+          ${isClaimed && rewardInfo.claim_note ? `<div class="reward-note">${rewardInfo.claim_note}</div>` : ''}
+        </article>
+      `;
+    }).join('');
+
+    nodes.rewardsList.querySelectorAll('.reward-claim-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (!beginActionLock(btn)) {
+          return;
+        }
+
+        try {
+          const rewardId = Number(btn.dataset.rewardId);
+          const result = await callStateApi('claim_reward', { reward_id: rewardId });
+          showAuthStatus(`Reward claimed: ${result.reward?.title || 'Healthy voucher'}`, 'ok');
+          render();
+        } catch (err) {
+          showAuthStatus(`Unable to claim reward: ${err.message}`, 'error');
+        } finally {
+          endActionLock(btn);
+        }
+      });
+    });
+  } catch (err) {
+    console.warn('Error rendering rewards:', err);
+    nodes.rewardsList.innerHTML = '<div class="empty-state subtle-box">Rewards are unavailable right now.</div>';
+  }
+}
+
+async function renderMealLog() {
+  let logs = state.logs;
+
+  if (currentUser) {
+    try {
+      const data = await callStateApi('meal_history');
+      if (Array.isArray(data.meals)) {
+        logs = data.meals;
+        state.logs = logs;
+        persist();
+      }
+    } catch (err) {
+      console.warn('Unable to fetch meal history from server, using local logs', err);
+    }
+  }
+
+  if (!logs.length) {
     nodes.mealLog.innerHTML = '<div class="empty-state">No meals logged yet. Log your first dish to start the quest.</div>';
     return;
   }
 
-  nodes.mealLog.innerHTML = state.logs.map((log) => {
+  nodes.mealLog.innerHTML = logs.map((log) => {
     let ingredientDisplay = '';
     if (log.ingredientBreakdown && log.ingredientBreakdown.length > 0) {
       ingredientDisplay = `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.85rem; color: var(--muted);">
